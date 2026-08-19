@@ -70,8 +70,20 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify source
-        run: pnpm verify
+      - name: Verify source formatting
+        run: pnpm format:check
+
+      - name: Lint source
+        run: pnpm lint
+
+      - name: Type-check source
+        run: pnpm typecheck
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Build source
+        run: pnpm build
 
       - name: Check source Windows helper
         if: runner.os == 'Windows'
