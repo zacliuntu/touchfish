@@ -10,9 +10,13 @@ describe('Windows helper release checks', () => {
       '[System.Management.Automation.Language.Parser]::ParseFile',
     )
     expect(checker).toMatch(/\$parseErrors\.Count\s+-ne\s+0/)
-    expect(checker).toContain(
-      "& $helperPath 'list-windows' '--payload-base64' $payloadBase64",
-    )
+    expect(checker).toContain("$startInfo.FileName = 'powershell.exe'")
+    expect(checker).toContain('$startInfo.ArgumentList.Add($argument)')
+    expect(checker).toContain('$startInfo.RedirectStandardOutput = $true')
+    expect(checker).toContain('$startInfo.RedirectStandardError = $true')
+    expect(checker).toContain('$process.StandardOutput.ReadToEndAsync()')
+    expect(checker).toContain('$process.StandardError.ReadToEndAsync()')
+    expect(checker).not.toContain('@(& $helperPath')
     expect(checker).toContain('ConvertFrom-Json')
     expect(checker).toMatch(/protocolVersion\s+-ne\s+1/)
     expect(checker).toMatch(/DPI_AWARENESS_FAILED/)

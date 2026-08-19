@@ -20,11 +20,50 @@ if ($parseErrors.Count -ne 0) {
 $payloadBase64 = [Convert]::ToBase64String(
   [Text.Encoding]::UTF8.GetBytes('{}')
 )
-$output = @(& $helperPath 'list-windows' '--payload-base64' $payloadBase64)
-if ($LASTEXITCODE -ne 0) {
-  throw "Windows helper exited with code $LASTEXITCODE"
+
+$startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+$startInfo.FileName = 'powershell.exe'
+$startInfo.UseShellExecute = $false
+$startInfo.CreateNoWindow = $true
+$startInfo.RedirectStandardOutput = $true
+$startInfo.RedirectStandardError = $true
+foreach ($argument in @(
+  '-NoLogo',
+  '-NoProfile',
+  '-NonInteractive',
+  '-ExecutionPolicy',
+  'Bypass',
+  '-File',
+  $helperPath,
+  'list-windows',
+  '--payload-base64',
+  $payloadBase64
+)) {
+  $null = $startInfo.ArgumentList.Add($argument)
 }
-if ($output.Count -ne 1 -or $output[0] -isnot [string]) {
+
+$process = [System.Diagnostics.Process]::new()
+$process.StartInfo = $startInfo
+try {
+  if (-not $process.Start()) {
+    throw 'Windows helper process could not be started'
+  }
+  $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+  $stderrTask = $process.StandardError.ReadToEndAsync()
+  $process.WaitForExit()
+  $stdout = $stdoutTask.GetAwaiter().GetResult()
+  $stderr = $stderrTask.GetAwaiter().GetResult()
+  $exitCode = $process.ExitCode
+} finally {
+  $process.Dispose()
+}
+
+if ($exitCode -ne 0) {
+  $detail = $stderr.Trim()
+  throw "Windows helper exited with code $exitCode$(if ($detail) { ": $detail" })"
+}
+$output = @($stdout -split '\r?\n' | Where-Object { $_.Trim().Length -gt 0 })
+if ($output.Count -ne 1) {
   throw 'Windows helper must emit exactly one JSON envelope'
 }
 
