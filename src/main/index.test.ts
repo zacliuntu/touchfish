@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, win32 } from 'node:path'
+import { isAbsolute, join, win32 } from 'node:path'
 
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 
@@ -61,6 +61,12 @@ describe('runSmokeTestHook', () => {
   })
 
   test('rejects missing or unrelated paths before Electron readiness', async () => {
+    const smokeRoot = join(tmpdir(), 'touchfish-path-test')
+    const firstDirectory = join(smokeRoot, 'one')
+    const secondDirectory = join(smokeRoot, 'two')
+    const readyFile = join(firstDirectory, 'ready.json')
+    const commandFile = join(secondDirectory, 'command.json')
+    const userDataDirectory = join(firstDirectory, 'user-data')
     const app = {
       setPath: vi.fn(),
       whenReady: vi.fn(async () => undefined),
@@ -72,9 +78,9 @@ describe('runSmokeTestHook', () => {
         app,
         env: {
           TOUCHFISH_SMOKE_TEST: '1',
-          TOUCHFISH_SMOKE_READY_FILE: '/tmp/one/ready.json',
-          TOUCHFISH_SMOKE_COMMAND_FILE: '/tmp/two/command.json',
-          TOUCHFISH_SMOKE_USER_DATA_DIR: '/tmp/one/user-data',
+          TOUCHFISH_SMOKE_READY_FILE: readyFile,
+          TOUCHFISH_SMOKE_COMMAND_FILE: commandFile,
+          TOUCHFISH_SMOKE_USER_DATA_DIR: userDataDirectory,
         },
         platform: 'linux',
         fs,
@@ -84,6 +90,9 @@ describe('runSmokeTestHook', () => {
       }),
     ).rejects.toThrow('same smoke directory')
 
+    expect([readyFile, commandFile, userDataDirectory].every(isAbsolute)).toBe(
+      true,
+    )
     expect(app.setPath).not.toHaveBeenCalled()
     expect(app.whenReady).not.toHaveBeenCalled()
   })
@@ -1242,6 +1251,7 @@ function registeredSaveHandler(config: {
         inspect: vi.fn().mockResolvedValue(null),
         apply: vi.fn().mockResolvedValue({ ok: false, reason: 'no-proposal' }),
       },
+      isTrustedSender: vi.fn().mockReturnValue(true),
       isTouchFishWindow: vi.fn().mockReturnValue(false),
       sleep: vi.fn().mockResolvedValue(undefined),
     },

@@ -189,7 +189,11 @@ export class SceneOrchestrator {
     displayId: string,
   ): Promise<NativeWindow | undefined> {
     try {
-      return selectWindow(await this.adapter.listWindows(), matcher)
+      return selectWindow(
+        await this.adapter.listWindows(),
+        matcher,
+        this.adapter.kind === 'windows',
+      )
     } catch {
       errors.push('external-window-list-failed')
       this.logError('external-window-list-failed', {
@@ -257,21 +261,36 @@ function defaultNotification(key: SceneNotificationKey): string {
 function selectWindow(
   windows: NativeWindow[],
   matcher: WindowMatcher,
+  caseInsensitive: boolean,
 ): NativeWindow | undefined {
   const visible = windows.filter((window) => window.visible)
   const tiers = [
     matcher.executablePath === ''
       ? []
-      : visible.filter(
-          (window) => window.executablePath === matcher.executablePath,
+      : visible.filter((window) =>
+          matchesIdentity(
+            window.executablePath,
+            matcher.executablePath,
+            caseInsensitive,
+          ),
         ),
     matcher.nativeClass === undefined || matcher.nativeClass === ''
       ? []
-      : visible.filter((window) => window.nativeClass === matcher.nativeClass),
+      : visible.filter((window) =>
+          matchesIdentity(
+            window.nativeClass,
+            matcher.nativeClass ?? '',
+            caseInsensitive,
+          ),
+        ),
     matcher.processName === ''
       ? []
-      : visible.filter(
-          (window) => basename(window.executablePath) === matcher.processName,
+      : visible.filter((window) =>
+          matchesIdentity(
+            basename(window.executablePath),
+            matcher.processName,
+            caseInsensitive,
+          ),
         ),
     matcher.titleHint === undefined || matcher.titleHint === ''
       ? []
@@ -281,6 +300,17 @@ function selectWindow(
   ]
 
   return tiers.find((tier) => tier.length > 0)?.sort(compareWindows)[0]
+}
+
+function matchesIdentity(
+  actual: string | undefined,
+  expected: string,
+  caseInsensitive: boolean,
+): boolean {
+  if (actual === undefined) return false
+  return caseInsensitive
+    ? actual.toLowerCase() === expected.toLowerCase()
+    : actual === expected
 }
 
 function basename(path: string | undefined): string {

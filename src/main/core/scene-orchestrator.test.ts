@@ -55,7 +55,7 @@ const config = (overrides: Partial<TouchFishConfig> = {}): TouchFishConfig => ({
 })
 
 class FakeAdapter implements PlatformAdapter {
-  readonly kind = 'linux-x11' as const
+  readonly kind: PlatformAdapter['kind']
   displays: DisplayInfo[] = [display('primary', true), display('secondary')]
   windows: NativeWindow[] = []
   readonly listDisplays = vi.fn(async () => this.displays)
@@ -66,6 +66,10 @@ class FakeAdapter implements PlatformAdapter {
   )
   readonly notify = vi.fn((_title: string, _body: string) => undefined)
   readonly captureForegroundWindow = vi.fn(async () => null)
+
+  constructor(kind: PlatformAdapter['kind'] = 'linux-x11') {
+    this.kind = kind
+  }
 }
 
 class FakeWeb implements WebTargetController {
@@ -81,8 +85,9 @@ class FakeLogger implements SceneLogger {
 const createSubject = (
   sleep: (milliseconds: number) => Promise<void> = async () => undefined,
   resolveNotification?: SceneNotificationResolver,
+  kind: PlatformAdapter['kind'] = 'linux-x11',
 ) => {
-  const adapter = new FakeAdapter()
+  const adapter = new FakeAdapter(kind)
   const web = new FakeWeb()
   const logger = new FakeLogger()
   return {
@@ -150,6 +155,96 @@ describe('SceneOrchestrator', () => {
       'window-1',
       adapter.displays[1],
     )
+  })
+
+  test.each([
+    [
+      'executable path',
+      window({ executablePath: 'C:\\PROGRAM FILES\\APP\\APP.EXE' }),
+      {
+        executablePath: 'c:\\program files\\app\\app.exe',
+        processName: 'missing.exe',
+        nativeClass: 'MissingClass',
+      },
+    ],
+    [
+      'native class',
+      window({
+        executablePath: 'C:\\Other\\Other.exe',
+        nativeClass: 'APPWINDOW',
+      }),
+      {
+        executablePath: 'missing.exe',
+        processName: 'missing.exe',
+        nativeClass: 'appwindow',
+      },
+    ],
+    [
+      'process name',
+      window({
+        executablePath: 'C:\\Program Files\\App\\APP.EXE',
+        nativeClass: 'OtherClass',
+      }),
+      {
+        executablePath: 'missing.exe',
+        processName: 'app.exe',
+        nativeClass: 'MissingClass',
+      },
+    ],
+  ] as const)(
+    'matches Windows %s case-insensitively without launching',
+    async (_label, existingWindow, matcher) => {
+      const { adapter, subject } = createSubject(
+        async () => undefined,
+        undefined,
+        'windows',
+      )
+      adapter.displays = [display('primary', true)]
+      adapter.windows = [existingWindow]
+
+      await expect(
+        subject.run(
+          config({
+            singleDisplayTarget: 'external',
+            external: {
+              executablePath: 'C:\\Program Files\\App\\App.exe',
+              args: [],
+              matcher,
+            },
+          }),
+        ),
+      ).resolves.toEqual({ status: 'success', errors: [] })
+      expect(adapter.launchExternal).not.toHaveBeenCalled()
+      expect(adapter.moveAndMaximize).toHaveBeenCalledWith(
+        existingWindow.id,
+        adapter.displays[0],
+      )
+    },
+  )
+
+  test('keeps Linux executable, process, and class matching case-sensitive', async () => {
+    const sleep = vi.fn(async () => undefined)
+    const { adapter, subject } = createSubject(sleep)
+    adapter.displays = [display('primary', true)]
+    adapter.windows = [
+      window({
+        executablePath: '/OPT/HELPFUL/APP',
+        nativeClass: 'HELPFULCLASS',
+        title: 'unrelated',
+      }),
+    ]
+
+    await expect(
+      subject.run(
+        config({ singleDisplayTarget: 'external', timeoutSeconds: 1 }),
+      ),
+    ).resolves.toEqual({
+      status: 'failed',
+      errors: ['external-window-timeout'],
+    })
+    expect(adapter.launchExternal).toHaveBeenCalledOnce()
+    expect(sleep).toHaveBeenCalledOnce()
+    expect(adapter.moveAndMaximize).not.toHaveBeenCalled()
   })
 
   test('matches the installed DingTalk process behind its launcher without relaunching', async () => {

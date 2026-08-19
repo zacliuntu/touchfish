@@ -46,6 +46,7 @@ export interface TouchFishIpcDependencies {
     inspect(): Promise<LegacyMigrationProposal | null>
     apply(proposal: LegacyMigrationProposal): Promise<LegacyMigrationResult>
   }
+  isTrustedSender(event: unknown): boolean
   isTouchFishWindow(window: NativeWindow): boolean
   sleep(milliseconds: number): Promise<void>
 }
@@ -61,6 +62,13 @@ export class IpcResponseValidationError extends Error {
   constructor(channel: IpcChannel) {
     super(`Invalid IPC response for ${channel}`)
     this.name = 'IpcResponseValidationError'
+  }
+}
+
+export class IpcSenderValidationError extends Error {
+  constructor() {
+    super('Unauthorized TouchFish IPC sender')
+    this.name = 'IpcSenderValidationError'
   }
 }
 
@@ -81,7 +89,10 @@ export function registerTouchFishIpc(
     responseSchema: z.ZodType<Response, unknown>,
     operation: (request: Request) => Promise<Response>,
   ): void => {
-    ipcMain.handle(channel, async (_event, request) => {
+    ipcMain.handle(channel, async (event, request) => {
+      if (!dependencies.isTrustedSender(event)) {
+        throw new IpcSenderValidationError()
+      }
       const parsedRequest = requestSchema.safeParse(request)
       if (!parsedRequest.success) {
         throw new IpcValidationError(channel)

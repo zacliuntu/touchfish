@@ -45,6 +45,7 @@ function createHarness() {
   const removeHandler = vi.fn((channel: string) => handlers.delete(channel))
   const calls: string[] = []
   let shortcutCallback: (() => void) | undefined
+  const trustedSender = {}
 
   const dependencies: TouchFishIpcDependencies = {
     config: {
@@ -81,6 +82,10 @@ function createHarness() {
       inspect: vi.fn(async () => ({ url: 'https://example.test/legacy' })),
       apply: vi.fn(async () => ({ ok: true as const })),
     },
+    isTrustedSender: vi.fn(
+      (event: unknown) =>
+        (event as { sender?: unknown } | undefined)?.sender === trustedSender,
+    ),
     isTouchFishWindow: vi.fn(() => false),
     sleep: vi.fn(async (milliseconds) => {
       calls.push(`sleep:${milliseconds}`)
@@ -95,17 +100,20 @@ function createHarness() {
     dependencies,
   )
 
-  const invoke = (channel: string, request: unknown) => {
+  const invokeAs = (event: unknown, channel: string, request: unknown) => {
     const handler = handlers.get(channel)
     if (handler === undefined) throw new Error(`missing handler: ${channel}`)
-    return handler({}, request)
+    return handler(event, request)
   }
+  const invoke = (channel: string, request: unknown) =>
+    invokeAs({ sender: trustedSender }, channel, request)
 
   return {
     calls,
     dependencies,
     handlers,
     invoke,
+    invokeAs,
     removeHandler,
     shortcutCallback: () => shortcutCallback,
   }
@@ -160,6 +168,24 @@ describe('TouchFish IPC bridge', () => {
       Object.keys(IPC_CHANNELS).length,
     )
   })
+
+  test.each([
+    [IPC_CHANNELS.saveConfig, defaultConfig, 'save'],
+    [IPC_CHANNELS.runScene, undefined, 'run'],
+    [IPC_CHANNELS.chooseExecutable, undefined, 'choose'],
+  ])(
+    'rejects an unauthorized sender before %s can reach services',
+    async (channel, request, _service) => {
+      const harness = createHarness()
+
+      await expect(
+        harness.invokeAs({ sender: {} }, channel, request),
+      ).rejects.toThrow('Unauthorized TouchFish IPC sender')
+      expect(harness.dependencies.config.save).not.toHaveBeenCalled()
+      expect(harness.dependencies.orchestrator.run).not.toHaveBeenCalled()
+      expect(harness.dependencies.dialog.showOpenFile).not.toHaveBeenCalled()
+    },
+  )
 
   test.each([
     [IPC_CHANNELS.saveConfig, { ...defaultConfig, extra: true }, 'config'],

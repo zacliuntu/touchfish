@@ -7,6 +7,70 @@ import {
   type SettingsWindowDependencies,
 } from './settings-window'
 
+class FakeSettingsSession {
+  downloadHandler: ((event: { preventDefault(): void }) => void) | undefined
+  permissionRequest:
+    | ((
+        webContents: unknown,
+        permission: unknown,
+        callback: (allowed: boolean) => void,
+      ) => void)
+    | undefined
+  permissionCheck: (() => boolean) | undefined
+
+  on(
+    event: string,
+    listener: (event: { preventDefault(): void }) => void,
+  ): this {
+    if (event === 'will-download') this.downloadHandler = listener
+    return this
+  }
+
+  setPermissionRequestHandler(
+    handler: (
+      webContents: unknown,
+      permission: unknown,
+      callback: (allowed: boolean) => void,
+    ) => void,
+  ): void {
+    this.permissionRequest = handler
+  }
+
+  setPermissionCheckHandler(handler: () => boolean): void {
+    this.permissionCheck = handler
+  }
+}
+
+class FakeSettingsWebContents {
+  readonly events = new Map<string, (...args: never[]) => void>()
+  readonly session = new FakeSettingsSession()
+  openHandler: (() => { action: 'deny' }) | undefined
+
+  getLastWebPreferences(): {
+    contextIsolation: true
+    nodeIntegration: false
+  } {
+    return { contextIsolation: true, nodeIntegration: false }
+  }
+
+  executeJavaScript(_code: string): Promise<undefined> {
+    return Promise.resolve(undefined)
+  }
+
+  on(event: string, listener: (...args: never[]) => void): this {
+    this.events.set(event, listener)
+    return this
+  }
+
+  setWindowOpenHandler(handler: () => { action: 'deny' }): void {
+    this.openHandler = handler
+  }
+
+  emit(event: string, ...args: never[]): void {
+    this.events.get(event)?.(...args)
+  }
+}
+
 class FakeSettingsWindow {
   readonly events = new Map<string, (...args: never[]) => void>()
   readonly calls: string[] = []
@@ -14,13 +78,7 @@ class FakeSettingsWindow {
   destroyed = false
   preventClose = false
   loadTarget: string | undefined
-  readonly webContents = {
-    getLastWebPreferences: () => ({
-      contextIsolation: true,
-      nodeIntegration: false,
-    }),
-    executeJavaScript: async (_code: string) => undefined,
-  }
+  readonly webContents = new FakeSettingsWebContents()
 
   loadURL(url: string): Promise<void> {
     this.loadTarget = url
@@ -161,6 +219,51 @@ describe('SettingsWindowController', () => {
       'show',
       'focus',
     ])
+  })
+
+  it('denies renderer navigation, popups, downloads, permissions, and webviews', async () => {
+    const { deps, windows } = createDependencies()
+    const controller = new SettingsWindowController(deps)
+    await controller.show()
+    const contents = (windows[0] as FakeSettingsWindow).webContents
+
+    for (const eventName of [
+      'will-navigate',
+      'will-redirect',
+      'will-attach-webview',
+    ]) {
+      let prevented = false
+      contents.emit(eventName, {
+        preventDefault: () => (prevented = true),
+      } as never)
+      expect(prevented, eventName).toBe(true)
+    }
+    expect(contents.openHandler?.()).toEqual({ action: 'deny' })
+
+    let downloadPrevented = false
+    contents.session.downloadHandler?.({
+      preventDefault: () => (downloadPrevented = true),
+    })
+    expect(downloadPrevented).toBe(true)
+    let permissionGranted: boolean | undefined
+    contents.session.permissionRequest?.(undefined, undefined, (allowed) => {
+      permissionGranted = allowed
+    })
+    expect(permissionGranted).toBe(false)
+    expect(contents.session.permissionCheck?.()).toBe(false)
+  })
+
+  it('only identifies the current live settings webContents as owned', async () => {
+    const { deps, windows } = createDependencies()
+    const controller = new SettingsWindowController(deps)
+    await controller.show()
+    const first = windows[0] as FakeSettingsWindow
+
+    expect(controller.ownsWebContents(first.webContents)).toBe(true)
+    expect(controller.ownsWebContents({})).toBe(false)
+
+    first.emit('closed')
+    expect(controller.ownsWebContents(first.webContents)).toBe(false)
   })
 
   it('hides user closes without creating a window and clears references after close or destroy', async () => {

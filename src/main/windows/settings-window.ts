@@ -3,11 +3,30 @@ import { join as nodeJoin } from 'node:path'
 
 export interface SettingsWindowLike {
   webContents: {
+    session: {
+      on(
+        event: 'will-download',
+        listener: (event: { preventDefault(): void }) => void,
+      ): unknown
+      setPermissionRequestHandler(
+        handler: (
+          webContents: unknown,
+          permission: unknown,
+          callback: (allowed: boolean) => void,
+        ) => void,
+      ): void
+      setPermissionCheckHandler(handler: () => boolean): void
+    }
     getLastWebPreferences(): {
       contextIsolation?: boolean
       nodeIntegration?: boolean
     }
     executeJavaScript(code: string): Promise<unknown>
+    on(
+      event: 'will-navigate' | 'will-redirect' | 'will-attach-webview',
+      listener: (event: { preventDefault(): void }) => void,
+    ): unknown
+    setWindowOpenHandler(handler: () => { action: 'deny' }): void
   }
   loadURL(url: string): Promise<void>
   loadFile(path: string): Promise<void>
@@ -58,6 +77,7 @@ function loadDefaultDependencies(): SettingsWindowDependencies {
 export class SettingsWindowController {
   private window: SettingsWindowLike | undefined
   private destroying = false
+  private readonly securedSessions = new WeakSet<object>()
 
   constructor(
     private readonly dependencies: SettingsWindowDependencies = loadDefaultDependencies(),
@@ -82,6 +102,14 @@ export class SettingsWindowController {
     if (this.window !== undefined && !this.window.isDestroyed()) {
       this.window.hide()
     }
+  }
+
+  ownsWebContents(candidate: unknown): boolean {
+    return (
+      this.window !== undefined &&
+      !this.window.isDestroyed() &&
+      candidate === this.window.webContents
+    )
   }
 
   destroy(): void {
@@ -113,6 +141,7 @@ export class SettingsWindowController {
       },
     })
     this.window = window
+    this.bindSecurity(window)
     window.on('close', (event) => {
       if (!this.destroying) {
         event?.preventDefault()
@@ -136,5 +165,26 @@ export class SettingsWindowController {
       )
     }
     return window
+  }
+
+  private bindSecurity(window: SettingsWindowLike): void {
+    for (const event of [
+      'will-navigate',
+      'will-redirect',
+      'will-attach-webview',
+    ] as const) {
+      window.webContents.on(event, (navigation) => navigation.preventDefault())
+    }
+    window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+
+    const session = window.webContents.session
+    if (!this.securedSessions.has(session)) {
+      this.securedSessions.add(session)
+      session.on('will-download', (event) => event.preventDefault())
+      session.setPermissionRequestHandler((_contents, _permission, callback) =>
+        callback(false),
+      )
+      session.setPermissionCheckHandler(() => false)
+    }
   }
 }

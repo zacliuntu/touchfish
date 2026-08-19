@@ -1096,6 +1096,10 @@ async function createProductionRuntime(
     web,
     settings,
     legacy,
+    isTrustedSender: (event) =>
+      settings.ownsWebContents(
+        (event as { sender?: unknown } | undefined)?.sender,
+      ),
     isTouchFishWindow: (window: NativeWindow) => window.pid === process.pid,
     sleep,
   })

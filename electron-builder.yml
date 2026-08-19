@@ -19,6 +19,7 @@ deb:
   depends:
     - wmctrl
     - x11-xserver-utils
+    - x11-utils
     - libgtk-3-0
     - libnotify4
     - libnss3

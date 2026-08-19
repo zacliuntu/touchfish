@@ -45,6 +45,7 @@ jobs:
             xvfb \
             wmctrl \
             x11-xserver-utils \
+            x11-utils \
             libgtk-3-0 \
             libnotify4 \
             libnss3 \
@@ -72,12 +73,22 @@ jobs:
       - name: Verify source
         run: pnpm verify
 
+      - name: Check source Windows helper
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/check-windows-helper.ps1 resources/windows/window-helper.ps1
+
       - name: Build native installer
         run: ${{ matrix.package-command }}
 
       - name: Smoke packaged Linux app
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum --server-args="-screen 0 1440x900x24" pnpm smoke:linux
+
+      - name: Check packaged Windows helper
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/check-windows-helper.ps1 dist/win-unpacked/resources/windows/window-helper.ps1
 
       - name: Smoke packaged Windows app
         if: runner.os == 'Windows'
