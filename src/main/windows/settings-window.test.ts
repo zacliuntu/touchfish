@@ -14,6 +14,13 @@ class FakeSettingsWindow {
   destroyed = false
   preventClose = false
   loadTarget: string | undefined
+  readonly webContents = {
+    getLastWebPreferences: () => ({
+      contextIsolation: true,
+      nodeIntegration: false,
+    }),
+    executeJavaScript: async (_code: string) => undefined,
+  }
 
   loadURL(url: string): Promise<void> {
     this.loadTarget = url
@@ -94,6 +101,18 @@ function createDependencies(): {
 }
 
 describe('SettingsWindowController', () => {
+  it('loads the production window hidden for startup verification', async () => {
+    const { deps, windows } = createDependencies()
+    const controller = new SettingsWindowController(deps)
+
+    const window = await controller.loadHidden()
+
+    expect(window).toBe(windows[0])
+    expect(windows[0]?.calls).toEqual([
+      `loadFile:${join('/app/out/main', '../renderer/index.html')}`,
+    ])
+  })
+
   it('creates a hidden, isolated local window with the only preload', async () => {
     const { deps, windows, options } = createDependencies()
     const controller = new SettingsWindowController(deps)

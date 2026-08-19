@@ -25,6 +25,8 @@
     "icons": "node scripts/generate-icons.mjs",
     "package:linux": "pnpm build && electron-builder --linux deb --x64",
     "package:win": "pnpm build && electron-builder --win nsis --x64",
+    "smoke:linux": "node scripts/smoke-electron.mjs dist/linux-unpacked/touchfish",
+    "smoke:win": "node scripts/smoke-electron.mjs dist/win-unpacked/TouchFish.exe",
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {

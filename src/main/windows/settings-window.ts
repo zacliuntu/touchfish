@@ -2,6 +2,13 @@ import { createRequire } from 'node:module'
 import { join as nodeJoin } from 'node:path'
 
 export interface SettingsWindowLike {
+  webContents: {
+    getLastWebPreferences(): {
+      contextIsolation?: boolean
+      nodeIntegration?: boolean
+    }
+    executeJavaScript(code: string): Promise<unknown>
+  }
   loadURL(url: string): Promise<void>
   loadFile(path: string): Promise<void>
   isMinimized(): boolean
@@ -57,12 +64,18 @@ export class SettingsWindowController {
   ) {}
 
   async show(): Promise<void> {
-    const window = this.window ?? (await this.createWindow())
+    const window = await this.loadHidden()
     if (window.isMinimized()) {
       window.restore()
     }
     window.show()
     window.focus()
+  }
+
+  loadHidden(): Promise<SettingsWindowLike> {
+    return this.window === undefined
+      ? this.createWindow()
+      : Promise.resolve(this.window)
   }
 
   hide(): void {

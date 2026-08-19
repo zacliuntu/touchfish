@@ -1,0 +1,144 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  verify-package:
+    name: Verify and package release (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-latest
+            package-command: pnpm package:linux
+            artifact-name: touchfish-release-linux
+            artifact-path: dist/TouchFish-*.deb
+          - name: Windows
+            os: windows-latest
+            package-command: pnpm package:win
+            artifact-name: touchfish-release-windows
+            artifact-path: dist/TouchFish-Setup-*.exe
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Linux runtime dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            xvfb \
+            wmctrl \
+            x11-xserver-utils \
+            libgtk-3-0 \
+            libnotify4 \
+            libnss3 \
+            libxss1 \
+            libxtst6 \
+            libatspi2.0-0 \
+            libuuid1 \
+            libsecret-1-0 \
+            libgbm1
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 10.33.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify tagged source
+        run: pnpm verify
+
+      - name: Build native installer
+        run: ${{ matrix.package-command }}
+
+      - name: Smoke packaged Linux app
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1440x900x24" pnpm smoke:linux
+
+      - name: Smoke packaged Windows app
+        if: runner.os == 'Windows'
+        run: pnpm smoke:win
+
+      - name: Upload native installer
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: ${{ matrix.artifact-path }}
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish GitHub Release
+    needs: verify-package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out checksum script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Download native installers
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: touchfish-release-*
+          path: release
+          merge-multiple: true
+
+      - name: Generate SHA-256 checksums
+        shell: bash
+        run: node scripts/checksums.mjs release/SHA256SUMS.txt release/*.deb release/*.exe
+
+      - name: Publish installers and checksums
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          fail_on_unmatched_files: true
+          files: |
+            release/*.deb
+            release/*.exe
+            release/SHA256SUMS.txt
+          body: |
+            ## English
+
+            TouchFish supports Ubuntu **X11 only**; Wayland is not supported in v0.1.0.
+
+            The Windows 10/11 installer is **unsigned**. Windows SmartScreen may warn before installation. Verify the matching entry in `SHA256SUMS.txt`, then use **More info → Run anyway** only if the checksum matches.
+
+            Automated verification and packaged smoke tests ran on Linux and Windows. A **post-release dual-display smoke test on real Windows hardware is still required**; CI does not replace that hardware check.
+
+            ## 中文
+
+            TouchFish 在 Ubuntu 上**仅支持 X11**；v0.1.0 不支持 Wayland。
+
+            Windows 10/11 安装程序**未签名**，可能触发 SmartScreen。请先核对 `SHA256SUMS.txt` 中对应文件的哈希；仅在校验一致时选择“更多信息 → 仍要运行”。
+
+            Linux 与 Windows 自动验证及安装包 smoke 已执行；发布后仍须在 **Windows 双屏真机**上完成场景切换 smoke，CI 不能替代该硬件验证。

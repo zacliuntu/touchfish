@@ -1,3 +1,5 @@
+import * as fs from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join, win32 } from 'node:path'
 
 import { beforeEach, describe, expect, test, vi } from 'vitest'
@@ -10,7 +12,11 @@ vi.mock('electron', () => ({
   BrowserWindow: vi.fn(),
 }))
 
-import type { PlatformAdapter, TouchFishConfig } from '../shared/models'
+import type {
+  DisplayInfo,
+  PlatformAdapter,
+  TouchFishConfig,
+} from '../shared/models'
 import { IPC_CHANNELS } from '../shared/ipc'
 import { configSchema, defaultConfig } from './config/schema'
 import { registerTouchFishIpc } from './ipc'
@@ -24,10 +30,238 @@ import {
   enrichFirstRunWithDingTalk,
   loadTrayIcon,
   resolveSceneNotification,
+  runSmokeTestHook,
   type ApplicationRuntime,
   type BootstrapDependencies,
   type LifecycleApp,
 } from './index'
+
+describe('runSmokeTestHook', () => {
+  test('is unreachable unless the guard is exactly enabled', async () => {
+    const app = {
+      setPath: vi.fn(),
+      whenReady: vi.fn(async () => undefined),
+      quit: vi.fn(),
+    }
+
+    await expect(
+      runSmokeTestHook({
+        app,
+        env: { TOUCHFISH_SMOKE_TEST: 'true' },
+        platform: 'linux',
+        fs,
+        selectAdapter: vi.fn(),
+        createSettings: vi.fn(),
+        sleep: vi.fn(),
+      }),
+    ).resolves.toBe(false)
+
+    expect(app.setPath).not.toHaveBeenCalled()
+    expect(app.whenReady).not.toHaveBeenCalled()
+  })
+
+  test('rejects missing or unrelated paths before Electron readiness', async () => {
+    const app = {
+      setPath: vi.fn(),
+      whenReady: vi.fn(async () => undefined),
+      quit: vi.fn(),
+    }
+
+    await expect(
+      runSmokeTestHook({
+        app,
+        env: {
+          TOUCHFISH_SMOKE_TEST: '1',
+          TOUCHFISH_SMOKE_READY_FILE: '/tmp/one/ready.json',
+          TOUCHFISH_SMOKE_COMMAND_FILE: '/tmp/two/command.json',
+          TOUCHFISH_SMOKE_USER_DATA_DIR: '/tmp/one/user-data',
+        },
+        platform: 'linux',
+        fs,
+        selectAdapter: vi.fn(),
+        createSettings: vi.fn(),
+        sleep: vi.fn(),
+      }),
+    ).rejects.toThrow('same smoke directory')
+
+    expect(app.setPath).not.toHaveBeenCalled()
+    expect(app.whenReady).not.toHaveBeenCalled()
+  })
+
+  test('atomically reports actual web preferences and exits on a quit command', async () => {
+    const smokeDirectory = await fs.mkdtemp(join(tmpdir(), 'touchfish-hook-'))
+    const readyFile = join(smokeDirectory, 'ready.json')
+    const commandFile = join(smokeDirectory, 'command.json')
+    const userDataDirectory = join(smokeDirectory, 'user-data')
+    await fs.writeFile(commandFile, '{"command":"quit"}\n', 'utf8')
+    const settingsWindow = {
+      webContents: {
+        getLastWebPreferences: vi.fn(() => ({
+          contextIsolation: true,
+          nodeIntegration: false,
+        })),
+        executeJavaScript: vi.fn(async () => ({
+          preload: true,
+          renderer: true,
+        })),
+      },
+    }
+    const settings = {
+      loadHidden: vi.fn(async () => settingsWindow),
+      destroy: vi.fn(),
+    }
+    const adapter = {
+      ...fakeAdapter(),
+      kind: 'linux-x11' as const,
+      listDisplays: vi.fn(async () => [testDisplay()]),
+    }
+    const app = {
+      setPath: vi.fn(),
+      whenReady: vi.fn(async () => undefined),
+      quit: vi.fn(),
+    }
+
+    try {
+      await expect(
+        runSmokeTestHook({
+          app,
+          env: {
+            TOUCHFISH_SMOKE_TEST: '1',
+            TOUCHFISH_SMOKE_READY_FILE: readyFile,
+            TOUCHFISH_SMOKE_COMMAND_FILE: commandFile,
+            TOUCHFISH_SMOKE_USER_DATA_DIR: userDataDirectory,
+          },
+          platform: 'linux',
+          fs,
+          selectAdapter: vi.fn(async () => adapter),
+          createSettings: vi.fn(() => settings),
+          sleep: vi.fn(async () => undefined),
+        }),
+      ).resolves.toBe(true)
+
+      await expect(
+        fs.readFile(readyFile, 'utf8').then(JSON.parse),
+      ).resolves.toEqual({
+        ready: true,
+        platform: 'linux',
+        adapter: 'linux-x11',
+        displayCount: 1,
+        contextIsolation: true,
+        nodeIntegration: false,
+      })
+      expect(app.setPath).toHaveBeenCalledWith('userData', userDataDirectory)
+      expect(app.setPath).toHaveBeenCalledWith(
+        'sessionData',
+        join(userDataDirectory, 'session'),
+      )
+      expect(adapter.listDisplays).toHaveBeenCalledOnce()
+      expect(settings.loadHidden).toHaveBeenCalledOnce()
+      expect(
+        settingsWindow.webContents.executeJavaScript,
+      ).toHaveBeenCalledOnce()
+      expect(settings.destroy).toHaveBeenCalledOnce()
+      expect(app.quit).toHaveBeenCalledOnce()
+    } finally {
+      await fs.rm(smokeDirectory, { recursive: true, force: true })
+    }
+  })
+
+  test('refuses to publish misleading readiness for insecure preferences', async () => {
+    const smokeDirectory = await fs.mkdtemp(join(tmpdir(), 'touchfish-hook-'))
+    const readyFile = join(smokeDirectory, 'ready.json')
+    const app = {
+      setPath: vi.fn(),
+      whenReady: vi.fn(async () => undefined),
+      quit: vi.fn(),
+    }
+
+    try {
+      await expect(
+        runSmokeTestHook({
+          app,
+          env: {
+            TOUCHFISH_SMOKE_TEST: '1',
+            TOUCHFISH_SMOKE_READY_FILE: readyFile,
+            TOUCHFISH_SMOKE_COMMAND_FILE: join(smokeDirectory, 'command.json'),
+            TOUCHFISH_SMOKE_USER_DATA_DIR: join(smokeDirectory, 'user-data'),
+          },
+          platform: 'win32',
+          fs,
+          selectAdapter: vi.fn(async () => ({
+            ...fakeAdapter(),
+            kind: 'windows' as const,
+            listDisplays: vi.fn(async () => [testDisplay()]),
+          })),
+          createSettings: vi.fn(() => ({
+            loadHidden: vi.fn(async () => ({
+              webContents: {
+                getLastWebPreferences: () => ({
+                  contextIsolation: false,
+                  nodeIntegration: true,
+                }),
+                executeJavaScript: vi.fn(),
+              },
+            })),
+            destroy: vi.fn(),
+          })),
+          sleep: vi.fn(async () => undefined),
+        }),
+      ).rejects.toThrow('secure web preferences')
+      await expect(fs.access(readyFile)).rejects.toMatchObject({
+        code: 'ENOENT',
+      })
+      expect(app.quit).not.toHaveBeenCalled()
+    } finally {
+      await fs.rm(smokeDirectory, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects a production window that did not load preload and renderer', async () => {
+    const smokeDirectory = await fs.mkdtemp(join(tmpdir(), 'touchfish-hook-'))
+    try {
+      await expect(
+        runSmokeTestHook({
+          app: {
+            setPath: vi.fn(),
+            whenReady: vi.fn(async () => undefined),
+            quit: vi.fn(),
+          },
+          env: {
+            TOUCHFISH_SMOKE_TEST: '1',
+            TOUCHFISH_SMOKE_READY_FILE: join(smokeDirectory, 'ready.json'),
+            TOUCHFISH_SMOKE_COMMAND_FILE: join(smokeDirectory, 'command.json'),
+            TOUCHFISH_SMOKE_USER_DATA_DIR: join(smokeDirectory, 'user-data'),
+          },
+          platform: 'linux',
+          fs,
+          selectAdapter: vi.fn(async () => ({
+            ...fakeAdapter(),
+            kind: 'linux-x11' as const,
+            listDisplays: vi.fn(async () => [testDisplay()]),
+          })),
+          createSettings: vi.fn(() => ({
+            loadHidden: vi.fn(async () => ({
+              webContents: {
+                getLastWebPreferences: () => ({
+                  contextIsolation: true,
+                  nodeIntegration: false,
+                }),
+                executeJavaScript: vi.fn(async () => ({
+                  preload: false,
+                  renderer: true,
+                })),
+              },
+            })),
+            destroy: vi.fn(),
+          })),
+          sleep: vi.fn(async () => undefined),
+        }),
+      ).rejects.toThrow('preload and renderer')
+    } finally {
+      await fs.rm(smokeDirectory, { recursive: true, force: true })
+    }
+  })
+})
 
 describe('loadTrayIcon', () => {
   test.each([
@@ -924,6 +1158,16 @@ function fakeAdapter(): PlatformAdapter {
     launchExternal: vi.fn(),
     moveAndMaximize: vi.fn(),
     notify: vi.fn(),
+  }
+}
+
+function testDisplay(): DisplayInfo {
+  return {
+    id: '1',
+    label: 'Display 1',
+    primary: true,
+    bounds: { x: 0, y: 0, width: 1440, height: 900 },
+    workArea: { x: 0, y: 0, width: 1440, height: 900 },
   }
 }
 

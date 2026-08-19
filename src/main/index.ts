@@ -1,6 +1,7 @@
 import { constants } from 'node:fs'
 import * as fs from 'node:fs/promises'
-import { join, posix, win32 } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { dirname, isAbsolute, join, posix, resolve, win32 } from 'node:path'
 
 import {
   app,
@@ -129,6 +130,33 @@ export interface TrayIconDependencies {
   nativeImage: {
     createFromPath(path: string): TrayIconImage
   }
+}
+
+interface SmokeSettings {
+  loadHidden(): Promise<{
+    webContents: {
+      getLastWebPreferences(): {
+        contextIsolation?: boolean
+        nodeIntegration?: boolean
+      }
+      executeJavaScript(code: string): Promise<unknown>
+    }
+  }>
+  destroy(): void
+}
+
+export interface SmokeTestHookDependencies {
+  app: {
+    setPath(name: 'userData' | 'sessionData', path: string): void
+    whenReady(): Promise<void>
+    quit(): void
+  }
+  env: Readonly<Record<string, string | undefined>>
+  platform: RuntimePlatform
+  fs: Pick<typeof fs, 'mkdir' | 'writeFile' | 'rename' | 'readFile' | 'unlink'>
+  selectAdapter(): Promise<PlatformAdapter>
+  createSettings(): SmokeSettings
+  sleep(milliseconds: number): Promise<void>
 }
 
 class UnsupportedPlatformError extends Error {
@@ -265,6 +293,157 @@ export function loadTrayIcon(
     throw new Error(`Unable to load TouchFish tray icon: ${path}`)
   }
   return icon
+}
+
+export async function runSmokeTestHook(
+  dependencies: SmokeTestHookDependencies,
+): Promise<boolean> {
+  if (dependencies.env.TOUCHFISH_SMOKE_TEST !== '1') return false
+
+  const readyFile = requiredAbsoluteSmokePath(
+    dependencies.env.TOUCHFISH_SMOKE_READY_FILE,
+    'TOUCHFISH_SMOKE_READY_FILE',
+  )
+  const commandFile = requiredAbsoluteSmokePath(
+    dependencies.env.TOUCHFISH_SMOKE_COMMAND_FILE,
+    'TOUCHFISH_SMOKE_COMMAND_FILE',
+  )
+  const userDataDirectory = requiredAbsoluteSmokePath(
+    dependencies.env.TOUCHFISH_SMOKE_USER_DATA_DIR,
+    'TOUCHFISH_SMOKE_USER_DATA_DIR',
+  )
+  const smokeDirectory = dirname(readyFile)
+  if (
+    dirname(commandFile) !== smokeDirectory ||
+    dirname(userDataDirectory) !== smokeDirectory
+  ) {
+    throw new Error(
+      'Smoke files and user data must share the same smoke directory',
+    )
+  }
+  if (
+    readyFile === commandFile ||
+    readyFile === userDataDirectory ||
+    commandFile === userDataDirectory
+  ) {
+    throw new Error('Smoke paths must be distinct')
+  }
+
+  dependencies.app.setPath('userData', userDataDirectory)
+  dependencies.app.setPath('sessionData', join(userDataDirectory, 'session'))
+  await dependencies.fs.mkdir(userDataDirectory, {
+    recursive: true,
+    mode: 0o700,
+  })
+  await dependencies.app.whenReady()
+
+  const adapter = await dependencies.selectAdapter()
+  const displays = await adapter.listDisplays()
+  if (displays.length === 0) {
+    throw new Error('Smoke adapter did not find a display')
+  }
+  const settings = dependencies.createSettings()
+  try {
+    const settingsWindow = await settings.loadHidden()
+    const preferences = settingsWindow.webContents.getLastWebPreferences()
+    if (
+      preferences.contextIsolation !== true ||
+      preferences.nodeIntegration !== false
+    ) {
+      throw new Error('Smoke window does not use secure web preferences')
+    }
+    const rendererProbe = await settingsWindow.webContents.executeJavaScript(
+      "({ preload: typeof window.touchfish === 'object', renderer: (document.querySelector('#root')?.childElementCount ?? 0) > 0 })",
+    )
+    if (
+      typeof rendererProbe !== 'object' ||
+      rendererProbe === null ||
+      !('preload' in rendererProbe) ||
+      rendererProbe.preload !== true ||
+      !('renderer' in rendererProbe) ||
+      rendererProbe.renderer !== true
+    ) {
+      throw new Error(
+        'Smoke window did not load the production preload and renderer',
+      )
+    }
+    await writeAtomicJson(dependencies, readyFile, {
+      ready: true,
+      platform: dependencies.platform,
+      adapter: adapter.kind,
+      displayCount: displays.length,
+      contextIsolation: preferences.contextIsolation,
+      nodeIntegration: preferences.nodeIntegration,
+    })
+    await waitForSmokeQuitCommand(dependencies, commandFile)
+  } finally {
+    settings.destroy()
+  }
+  dependencies.app.quit()
+  return true
+}
+
+function requiredAbsoluteSmokePath(
+  value: string | undefined,
+  name: string,
+): string {
+  if (value === undefined || value.trim() === '' || !isAbsolute(value)) {
+    throw new Error(`${name} must be an absolute path`)
+  }
+  return resolve(value)
+}
+
+async function writeAtomicJson(
+  dependencies: SmokeTestHookDependencies,
+  destination: string,
+  value: object,
+): Promise<void> {
+  const temporary = `${destination}.${process.pid}.${randomUUID()}.tmp`
+  try {
+    await dependencies.fs.writeFile(temporary, `${JSON.stringify(value)}\n`, {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    })
+    await dependencies.fs.rename(temporary, destination)
+  } catch (error: unknown) {
+    await dependencies.fs.unlink(temporary).catch(() => undefined)
+    throw error
+  }
+}
+
+async function waitForSmokeQuitCommand(
+  dependencies: SmokeTestHookDependencies,
+  commandFile: string,
+): Promise<void> {
+  for (;;) {
+    try {
+      const command = JSON.parse(
+        await dependencies.fs.readFile(commandFile, 'utf8'),
+      ) as unknown
+      if (
+        typeof command === 'object' &&
+        command !== null &&
+        'command' in command &&
+        command.command === 'quit'
+      ) {
+        return
+      }
+      throw new Error('Smoke command file must request quit')
+    } catch (error: unknown) {
+      if (!isMissingFile(error)) throw error
+    }
+    await dependencies.sleep(50)
+  }
+}
+
+function isMissingFile(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'ENOENT'
+  )
 }
 
 export async function enrichFirstRunWithDingTalk(
@@ -966,5 +1145,22 @@ function sleep(milliseconds: number): Promise<void> {
 }
 
 if (process.env.NODE_ENV !== 'test') {
-  bootstrapTouchFish(createProductionDependencies())
+  if (process.env.TOUCHFISH_SMOKE_TEST === '1') {
+    void runSmokeTestHook({
+      app,
+      env: process.env,
+      platform: process.platform,
+      fs,
+      selectAdapter: () => selectAdapter(createProductionDependencies()),
+      createSettings: () => new SettingsWindowController(),
+      sleep,
+    }).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error)
+      process.stderr.write(`TouchFish smoke hook failed: ${message}\n`)
+      process.exitCode = 1
+      quitSafely(app)
+    })
+  } else {
+    bootstrapTouchFish(createProductionDependencies())
+  }
 }
