@@ -1,4 +1,4 @@
-import { win32 } from 'node:path'
+import { join, win32 } from 'node:path'
 
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 
@@ -22,11 +22,50 @@ import {
   createCoordinatedTrayAutostart,
   createTrayErrorHandler,
   enrichFirstRunWithDingTalk,
+  loadTrayIcon,
   resolveSceneNotification,
   type ApplicationRuntime,
   type BootstrapDependencies,
   type LifecycleApp,
 } from './index'
+
+describe('loadTrayIcon', () => {
+  test.each([
+    [false, join('/repo', 'build', 'icons', '32x32.png')],
+    [true, join('/packed', 'icons', 'tray.png')],
+  ])(
+    'loads the %s packaged-state icon from an explicit path',
+    (isPackaged, path) => {
+      const image = { isEmpty: vi.fn(() => false) }
+      const createFromPath = vi.fn(() => image)
+
+      expect(
+        loadTrayIcon({
+          isPackaged,
+          resourcesPath: '/packed',
+          appPath: '/repo',
+          nativeImage: { createFromPath },
+        }),
+      ).toBe(image)
+      expect(createFromPath).toHaveBeenCalledWith(path)
+    },
+  )
+
+  test('rejects an unreadable tray asset instead of passing an empty image', () => {
+    const path = join('/repo', 'build', 'icons', '32x32.png')
+
+    expect(() =>
+      loadTrayIcon({
+        isPackaged: false,
+        resourcesPath: '/packed',
+        appPath: '/repo',
+        nativeImage: {
+          createFromPath: vi.fn(() => ({ isEmpty: () => true })),
+        },
+      }),
+    ).toThrow(`Unable to load TouchFish tray icon: ${path}`)
+  })
+})
 
 describe('bootstrapTouchFish', () => {
   beforeEach(() => {

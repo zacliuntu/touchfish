@@ -118,6 +118,19 @@ export interface DingTalkProbeDependencies {
   shouldStop?(): boolean
 }
 
+interface TrayIconImage {
+  isEmpty(): boolean
+}
+
+export interface TrayIconDependencies {
+  isPackaged: boolean
+  resourcesPath: string
+  appPath: string
+  nativeImage: {
+    createFromPath(path: string): TrayIconImage
+  }
+}
+
 class UnsupportedPlatformError extends Error {
   constructor(readonly reason: 'linux-x11-required' | 'unsupported-os') {
     super(reason)
@@ -239,6 +252,19 @@ export function bootstrapTouchFish(
     })
 
   return { initialized, dispose }
+}
+
+export function loadTrayIcon(
+  dependencies: TrayIconDependencies,
+): TrayIconImage {
+  const path = dependencies.isPackaged
+    ? join(dependencies.resourcesPath, 'icons', 'tray.png')
+    : join(dependencies.appPath, 'build', 'icons', '32x32.png')
+  const icon = dependencies.nativeImage.createFromPath(path)
+  if (icon.isEmpty()) {
+    throw new Error(`Unable to load TouchFish tray icon: ${path}`)
+  }
+  return icon
 }
 
 export async function enrichFirstRunWithDingTalk(
@@ -824,7 +850,12 @@ async function createProductionRuntime(
   const trayService = new TrayService({
     Tray: Tray as unknown as TrayServiceDependencies['Tray'],
     Menu,
-    icon: nativeImage.createEmpty(),
+    icon: loadTrayIcon({
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      appPath: app.getAppPath(),
+      nativeImage,
+    }),
     locale: app.getLocale(),
     onOpenSettings: controls.openSettings,
     onRunScene: controls.runScene,

@@ -1,7 +1,15 @@
 {
   "name": "touchfish",
   "productName": "TouchFish",
+  "desktopName": "touchfish",
   "version": "0.1.0",
+  "license": "MIT",
+  "description": "Arrange a web target and desktop application across one or more displays.",
+  "homepage": "https://github.com/zacliuntu/touchfish",
+  "author": {
+    "name": "zacliuntu",
+    "email": "zacliuntu@users.noreply.github.com"
+  },
   "type": "module",
   "main": "out/main/index.js",
   "packageManager": "pnpm@10.33.0",

@@ -1,0 +1,43 @@
+appId: io.github.zacliuntu.touchfish
+productName: TouchFish
+asar: true
+files:
+  - out/**
+extraResources:
+  - from: resources/windows/window-helper.ps1
+    to: windows/window-helper.ps1
+  - from: build/icons/32x32.png
+    to: icons/tray.png
+linux:
+  syncDesktopName: true
+  target:
+    - deb
+  category: Utility
+  icon: build/icons
+  artifactName: TouchFish-${version}-${arch}.deb
+deb:
+  depends:
+    - wmctrl
+    - x11-xserver-utils
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0
+  afterInstall: build/after-install.sh
+  afterRemove: build/after-remove.sh
+win:
+  target:
+    - nsis
+  icon: build/icons/icon.ico
+  artifactName: TouchFish-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: false
+  createStartMenuShortcut: true
