@@ -1,0 +1,6 @@
+# Preserve LF line endings in every platform checkout.
+* text=auto eol=lf
+
+# Generated application icons are binary assets.
+*.png binary
+*.ico binary
