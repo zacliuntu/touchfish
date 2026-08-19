@@ -1,4 +1,4 @@
-import { join } from 'node:path'
+import { posix } from 'node:path'
 
 export interface FileHandleLike {
   writeFile(contents: string, encoding: 'utf8'): Promise<void>
@@ -85,7 +85,7 @@ export class AutostartService {
   }
 
   private async enableLinux(): Promise<void> {
-    const directory = join(this.dependencies.configHome, 'autostart')
+    const directory = posix.join(this.dependencies.configHome, 'autostart')
     const path = this.desktopEntryPath()
     const temporaryPath = `${path}.tmp`
     await this.dependencies.fs.mkdir(directory, {
@@ -115,7 +115,11 @@ export class AutostartService {
   }
 
   private desktopEntryPath(): string {
-    return join(this.dependencies.configHome, 'autostart', 'touchfish.desktop')
+    return posix.join(
+      this.dependencies.configHome,
+      'autostart',
+      'touchfish.desktop',
+    )
   }
 
   private desktopEntry(): string {
