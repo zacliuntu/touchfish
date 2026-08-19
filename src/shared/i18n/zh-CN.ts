@@ -1,4 +1,5 @@
 import type { Translations } from './en'
+import { sceneNotifications } from './scene-notifications'
 
 export const zhCN: Translations = {
   app: {
@@ -107,10 +108,7 @@ export const zhCN: Translations = {
     hidden: '隐藏',
   },
   scene: {
-    success: '场景运行成功。',
-    partial: '场景已运行，但部分操作出现问题。',
-    failed: '场景运行失败。',
-    busy: '已有场景正在运行。',
+    ...sceneNotifications['zh-CN'],
     error: '无法运行场景。',
     errors: {
       scenePlanFailed: '无法创建屏幕分配方案。',

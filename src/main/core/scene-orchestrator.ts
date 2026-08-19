@@ -5,6 +5,7 @@ import type {
   TouchFishConfig,
   WindowMatcher,
 } from '../../shared/models'
+import type { SceneNotificationKey } from '../../shared/i18n/scene-notifications'
 import { planScene } from './scene-plan'
 
 export interface WebTargetController {
@@ -22,6 +23,13 @@ export type SceneRunResult = {
   errors: string[]
 }
 
+export type { SceneNotificationKey } from '../../shared/i18n/scene-notifications'
+
+export type SceneNotificationResolver = (
+  key: SceneNotificationKey,
+  config: TouchFishConfig,
+) => string
+
 type Sleep = (milliseconds: number) => Promise<void>
 
 export class SceneOrchestrator {
@@ -32,11 +40,12 @@ export class SceneOrchestrator {
     private readonly web: WebTargetController,
     private readonly logger: SceneLogger,
     private readonly sleep: Sleep = delay,
+    private readonly resolveNotification: SceneNotificationResolver = defaultNotification,
   ) {}
 
   async run(config: TouchFishConfig): Promise<SceneRunResult> {
     if (this.running) {
-      this.notify('TouchFish', 'A scene is already running.')
+      this.notify('TouchFish', this.resolveNotification('busy', config))
       const result: SceneRunResult = { status: 'busy', errors: [] }
       this.logInfo('scene-run-finished', result)
       return result
@@ -58,11 +67,11 @@ export class SceneOrchestrator {
       displays = await this.adapter.listDisplays()
       plan = planScene(displays, config)
     } catch {
-      return this.finish(['scene-plan-failed'], 0)
+      return this.finish(['scene-plan-failed'], 0, config)
     }
 
     if (plan.usedFallback) {
-      this.notify('TouchFish', 'Using fallback display assignments.')
+      this.notify('TouchFish', this.resolveNotification('fallback', config))
       this.logInfo('scene-plan-fallback')
     }
 
@@ -85,7 +94,7 @@ export class SceneOrchestrator {
       }
     }
 
-    return this.finish(errors, successes)
+    return this.finish(errors, successes, config)
   }
 
   private async placeWeb(
@@ -191,19 +200,16 @@ export class SceneOrchestrator {
     }
   }
 
-  private finish(errors: string[], successes: number): SceneRunResult {
+  private finish(
+    errors: string[],
+    successes: number,
+    config: TouchFishConfig,
+  ): SceneRunResult {
     const status =
       errors.length === 0 ? 'success' : successes > 0 ? 'partial' : 'failed'
 
     const result: SceneRunResult = { status, errors }
-    const notification =
-      status === 'success'
-        ? 'Scene setup completed successfully.'
-        : status === 'partial'
-          ? 'Scene setup partially completed.'
-          : 'Scene setup failed.'
-
-    this.notify('TouchFish', notification)
+    this.notify('TouchFish', this.resolveNotification(status, config))
     this.logInfo('scene-run-finished', result)
     return result
   }
@@ -235,6 +241,17 @@ export class SceneOrchestrator {
       // Logging must not alter scene execution.
     }
   }
+}
+
+function defaultNotification(key: SceneNotificationKey): string {
+  const messages: Record<SceneNotificationKey, string> = {
+    busy: 'A scene is already running.',
+    fallback: 'Using fallback display assignments.',
+    success: 'Scene setup completed successfully.',
+    partial: 'Scene setup partially completed.',
+    failed: 'Scene setup failed.',
+  }
+  return messages[key]
 }
 
 function selectWindow(

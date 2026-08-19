@@ -22,7 +22,6 @@ describe('TrayService', () => {
       onOpenSettings: vi.fn(),
       onRunScene: vi.fn(),
       onQuit: vi.fn(),
-      shortcut: { dispose: vi.fn() },
       autostart,
     })
 
@@ -66,7 +65,6 @@ describe('TrayService', () => {
       onOpenSettings,
       onRunScene,
       onQuit: vi.fn(),
-      shortcut: { dispose: vi.fn() },
       autostart,
     })
     await service.initialize()
@@ -84,7 +82,7 @@ describe('TrayService', () => {
     })
   })
 
-  test('quits in the explicit cleanup order and is idempotent', async () => {
+  test('destroys the tray, requests app quit, and is idempotent', async () => {
     const order: string[] = []
     const buildFromTemplate = vi.fn((template) => template)
     const tray = {
@@ -92,7 +90,6 @@ describe('TrayService', () => {
       setContextMenu: vi.fn(),
       destroy: vi.fn(() => order.push('tray')),
     }
-    const shortcut = { dispose: vi.fn(() => order.push('shortcut')) }
     const onQuit = vi.fn(() => order.push('app'))
     const service = new TrayService({
       Tray: trayClass(tray),
@@ -102,7 +99,6 @@ describe('TrayService', () => {
       onOpenSettings: vi.fn(),
       onRunScene: vi.fn(),
       onQuit,
-      shortcut,
       autostart: {
         isEnabled: vi.fn().mockResolvedValue(false),
         setEnabled: vi.fn(),
@@ -114,7 +110,73 @@ describe('TrayService', () => {
     menu?.[3]?.click?.()
     menu?.[3]?.click?.()
 
-    expect(order).toEqual(['tray', 'shortcut', 'app'])
+    expect(order).toEqual(['tray', 'app'])
+  })
+
+  test('disposes the tray without asking the app to quit', async () => {
+    const tray = {
+      setToolTip: vi.fn(),
+      setContextMenu: vi.fn(),
+      destroy: vi.fn(),
+    }
+    const onQuit = vi.fn()
+    const service = new TrayService({
+      Tray: trayClass(tray),
+      Menu: { buildFromTemplate: vi.fn((template) => template) },
+      icon: 'icon',
+      locale: 'en-US',
+      onOpenSettings: vi.fn(),
+      onRunScene: vi.fn(),
+      onQuit,
+      autostart: {
+        isEnabled: vi.fn().mockResolvedValue(false),
+        setEnabled: vi.fn(),
+      },
+    })
+    await service.initialize()
+
+    service.dispose()
+    service.dispose()
+
+    expect(tray.destroy).toHaveBeenCalledOnce()
+    expect(onQuit).not.toHaveBeenCalled()
+  })
+
+  test('contains a rejected autostart toggle, preserves state, and reports it', async () => {
+    const buildFromTemplate = vi.fn((template) => template)
+    const tray = {
+      setToolTip: vi.fn(),
+      setContextMenu: vi.fn(),
+      destroy: vi.fn(),
+    }
+    const error = new Error('login integration unavailable')
+    const onError = vi.fn()
+    const service = new TrayService({
+      Tray: trayClass(tray),
+      Menu: { buildFromTemplate },
+      icon: 'icon',
+      locale: 'en-US',
+      onOpenSettings: vi.fn(),
+      onRunScene: vi.fn(),
+      onQuit: vi.fn(),
+      onError,
+      autostart: {
+        isEnabled: vi.fn().mockResolvedValue(false),
+        setEnabled: vi.fn().mockRejectedValue(error),
+      },
+    })
+    await service.initialize()
+    const menu = buildFromTemplate.mock.calls.at(-1)?.[0]
+
+    const result = menu?.[2]?.click?.()
+    if (result instanceof Promise) void result.catch(() => undefined)
+    await flushPromises()
+
+    expect(result).toBeUndefined()
+    expect(onError).toHaveBeenCalledWith(error)
+    expect(buildFromTemplate.mock.calls.at(-1)?.[0]?.[2]).toMatchObject({
+      checked: false,
+    })
   })
 
   test('shares one in-flight initialization across concurrent callers', async () => {
@@ -205,9 +267,12 @@ function createTrayService({
     onOpenSettings: vi.fn(),
     onRunScene: vi.fn(),
     onQuit: vi.fn(),
-    shortcut: { dispose: vi.fn() },
     autostart: { isEnabled, setEnabled: vi.fn() },
   })
+}
+
+async function flushPromises(): Promise<void> {
+  await new Promise((resolve) => globalThis.setTimeout(resolve, 0))
 }
 
 function deferred<Value>(): {

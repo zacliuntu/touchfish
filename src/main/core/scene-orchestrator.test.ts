@@ -11,6 +11,7 @@ import type {
 import {
   SceneOrchestrator,
   type SceneLogger,
+  type SceneNotificationResolver,
   type WebTargetController,
 } from './scene-orchestrator'
 
@@ -79,6 +80,7 @@ class FakeLogger implements SceneLogger {
 
 const createSubject = (
   sleep: (milliseconds: number) => Promise<void> = async () => undefined,
+  resolveNotification?: SceneNotificationResolver,
 ) => {
   const adapter = new FakeAdapter()
   const web = new FakeWeb()
@@ -87,7 +89,13 @@ const createSubject = (
     adapter,
     web,
     logger,
-    subject: new SceneOrchestrator(adapter, web, logger, sleep),
+    subject: new SceneOrchestrator(
+      adapter,
+      web,
+      logger,
+      sleep,
+      resolveNotification,
+    ),
   }
 }
 
@@ -141,6 +149,47 @@ describe('SceneOrchestrator', () => {
     expect(adapter.moveAndMaximize).toHaveBeenCalledWith(
       'window-1',
       adapter.displays[1],
+    )
+  })
+
+  test('matches the installed DingTalk process behind its launcher without relaunching', async () => {
+    const sleep = vi.fn(async () => undefined)
+    const { adapter, subject } = createSubject(sleep)
+    adapter.displays = [display('primary', true)]
+    adapter.windows = [
+      window({
+        id: 'dingtalk-window',
+        executablePath:
+          '/opt/apps/com.alibabainc.dingtalk/files/com.alibabainc.dingtalk',
+        nativeClass: 'com.alibabainc.dingtalk',
+        title: '钉钉',
+      }),
+    ]
+
+    await expect(
+      subject.run(
+        config({
+          singleDisplayTarget: 'external',
+          external: {
+            executablePath:
+              '/opt/apps/com.alibabainc.dingtalk/files/Elevator.sh',
+            args: [],
+            matcher: {
+              executablePath:
+                '/opt/apps/com.alibabainc.dingtalk/files/Elevator.sh',
+              processName: 'com.alibabainc.dingtalk',
+              nativeClass: 'com.alibabainc.dingtalk',
+            },
+          },
+        }),
+      ),
+    ).resolves.toEqual({ status: 'success', errors: [] })
+
+    expect(adapter.launchExternal).not.toHaveBeenCalled()
+    expect(sleep).not.toHaveBeenCalled()
+    expect(adapter.moveAndMaximize).toHaveBeenCalledWith(
+      'dingtalk-window',
+      adapter.displays[0],
     )
   })
 
@@ -225,6 +274,32 @@ describe('SceneOrchestrator', () => {
       status: 'busy',
       errors: [],
     })
+    release()
+    await first
+  })
+
+  test('uses an injected resolver for busy notifications', async () => {
+    let release!: () => void
+    const resolveNotification = vi.fn<SceneNotificationResolver>(
+      (key) => `中文:${key}`,
+    )
+    const { adapter, subject } = createSubject(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        }),
+      resolveNotification,
+    )
+    const configured = config({ timeoutSeconds: 1, language: 'zh-CN' })
+    const first = subject.run(configured)
+    await vi.waitFor(() =>
+      expect(adapter.launchExternal).toHaveBeenCalledOnce(),
+    )
+
+    await subject.run(configured)
+
+    expect(adapter.notify).toHaveBeenCalledWith('TouchFish', '中文:busy')
+    expect(resolveNotification).toHaveBeenCalledWith('busy', configured)
     release()
     await first
   })
@@ -405,6 +480,54 @@ describe('SceneOrchestrator', () => {
     expect(logger.error).toHaveBeenCalledWith('web-placement-failed', {
       target: 'web',
       displayId: 'primary',
+    })
+  })
+
+  test('uses injected fallback and final-status messages without translating log IDs', async () => {
+    const resolveNotification = vi.fn<SceneNotificationResolver>(
+      (key) => `中文:${key}`,
+    )
+    const { adapter, logger, subject } = createSubject(
+      async () => undefined,
+      resolveNotification,
+    )
+    adapter.displays = [
+      display('primary', true),
+      display('secondary'),
+      display('third'),
+    ]
+    adapter.windows = [window()]
+    const configured = config({ language: 'zh-CN' })
+
+    await expect(subject.run(configured)).resolves.toEqual({
+      status: 'success',
+      errors: [],
+    })
+
+    expect(adapter.notify).toHaveBeenNthCalledWith(
+      1,
+      'TouchFish',
+      '中文:fallback',
+    )
+    expect(adapter.notify).toHaveBeenNthCalledWith(
+      2,
+      'TouchFish',
+      '中文:success',
+    )
+    expect(resolveNotification).toHaveBeenNthCalledWith(
+      1,
+      'fallback',
+      configured,
+    )
+    expect(resolveNotification).toHaveBeenNthCalledWith(
+      2,
+      'success',
+      configured,
+    )
+    expect(logger.info).toHaveBeenCalledWith('scene-plan-fallback')
+    expect(logger.info).toHaveBeenCalledWith('scene-run-finished', {
+      status: 'success',
+      errors: [],
     })
   })
 

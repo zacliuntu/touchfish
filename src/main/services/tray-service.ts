@@ -1,7 +1,6 @@
 import type { AppLanguage } from '../../shared/models'
 
 import type { AutostartService } from './autostart-service'
-import type { ShortcutService } from './shortcut-service'
 
 export interface TrayLike {
   setToolTip(text: string): void
@@ -24,7 +23,7 @@ export interface TrayServiceDependencies {
   onOpenSettings(): void | Promise<void>
   onRunScene(): void | Promise<void>
   onQuit(): void
-  shortcut: Pick<ShortcutService, 'dispose'>
+  onError?(error: unknown): void
   autostart: Pick<AutostartService, 'isEnabled' | 'setEnabled'>
 }
 
@@ -60,10 +59,21 @@ export class TrayService {
       return
     }
     this.quitting = true
+    this.destroyTray()
+    this.dependencies.onQuit()
+  }
+
+  dispose(): void {
+    if (this.quitting) {
+      return
+    }
+    this.quitting = true
+    this.destroyTray()
+  }
+
+  private destroyTray(): void {
     this.tray?.destroy()
     this.tray = undefined
-    this.dependencies.shortcut.dispose()
-    this.dependencies.onQuit()
   }
 
   private rebuildMenu(): void {
@@ -106,11 +116,8 @@ export class TrayService {
         label: chinese ? '开机启动' : 'Start at Login',
         type: 'checkbox',
         checked: this.startAtLogin,
-        click: async () => {
-          const enabled = !this.startAtLogin
-          await this.dependencies.autostart.setEnabled(enabled)
-          this.startAtLogin = enabled
-          this.rebuildMenu()
+        click: () => {
+          void this.toggleAutostart()
         },
       },
       {
@@ -125,5 +132,20 @@ export class TrayService {
       return this.dependencies.locale
     }
     return this.language
+  }
+
+  private async toggleAutostart(): Promise<void> {
+    const enabled = !this.startAtLogin
+    try {
+      await this.dependencies.autostart.setEnabled(enabled)
+      this.startAtLogin = enabled
+    } catch (error: unknown) {
+      try {
+        this.dependencies.onError?.(error)
+      } catch {
+        // Error reporting must not turn a handled menu failure into a rejection.
+      }
+    }
+    this.rebuildMenu()
   }
 }

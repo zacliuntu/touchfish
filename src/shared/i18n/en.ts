@@ -1,3 +1,5 @@
+import { sceneNotifications } from './scene-notifications'
+
 export const en = {
   app: {
     name: 'TouchFish',
@@ -108,10 +110,7 @@ export const en = {
     hidden: 'Hidden',
   },
   scene: {
-    success: 'Scene completed successfully.',
-    partial: 'Scene completed with some problems.',
-    failed: 'Scene failed.',
-    busy: 'A scene is already running.',
+    ...sceneNotifications.en,
     error: 'Could not run the scene.',
     errors: {
       scenePlanFailed: 'The display plan could not be created.',
