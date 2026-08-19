@@ -1,0 +1,5 @@
+0x03e00007  0  1234  0  0  1280  720  dingtalk.DingTalk  host-a  DingTalk - Project Alpha
+0x03e00008  0  1234  -1280  0  1280  720  dingtalk.DingTalk  host-a  DingTalk - Project Beta
+0x03e00009  0  77  0  0  0  720  app.Class  host-b  Hidden overlay
+0x03e0000A  -1  42  10  20  400  300  browser.Browser  host-c  Browser window title
+0x03e0000B  0  99  0  0  300  200  notes.App  host-d    Spaced  	 title

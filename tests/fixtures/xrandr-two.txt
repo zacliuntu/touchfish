@@ -1,0 +1,5 @@
+Screen 0: minimum 8 x 8, current 3200 x 1080, maximum 32767 x 32767
+HDMI-A-0 connected primary 1920x1080+0+0 (normal left inverted right x axis y axis) 510mm x 287mm
+DVI-D-0 connected 1280x1024-1280+0 left (normal left inverted right x axis y axis) 376mm x 301mm
+DP-1 disconnected (normal left inverted right x axis y axis)
+DP-2 connected (normal left inverted right x axis y axis)
