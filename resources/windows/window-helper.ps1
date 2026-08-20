@@ -49,19 +49,24 @@ function Get-WindowId([IntPtr]$handle) {
 }
 
 function Get-WindowRecord([IntPtr]$handle) {
+  $script:requestStage = 'window-visibility'
   if (-not [TouchFishNative]::IsWindowVisible($handle)) { return $null }
+  $script:requestStage = 'window-style'
   if ([TouchFishNative]::GetWindow($handle, 4) -ne [IntPtr]::Zero) { return $null }
   $style = [TouchFishNative]::GetWindowLong($handle, -20).ToInt64()
   if (($style -band 0x80) -ne 0) { return $null }
+  $script:requestStage = 'window-bounds'
   $rect = New-Object TouchFishNative+RECT
   if (-not [TouchFishNative]::GetWindowRect($handle, [ref]$rect)) { return $null }
   $width = $rect.Right - $rect.Left
   $height = $rect.Bottom - $rect.Top
   if ($width -le 0 -or $height -le 0) { return $null }
 
+  $script:requestStage = 'window-process-id'
   [uint32]$ownerProcessId = 0
   $null = [TouchFishNative]::GetWindowThreadProcessId($handle, [ref]$ownerProcessId)
   if ($ownerProcessId -eq 0) { return $null }
+  $script:requestStage = 'window-metadata'
   $title = New-Object System.Text.StringBuilder 32768
   $className = New-Object System.Text.StringBuilder 256
   $null = [TouchFishNative]::GetWindowText($handle, $title, $title.Capacity)
@@ -82,13 +87,18 @@ function Get-WindowRecord([IntPtr]$handle) {
 }
 
 function Get-AllWindows {
+  $script:requestStage = 'enumeration-callback-setup'
   $windows = New-Object System.Collections.Generic.List[object]
   $callback = [TouchFishNative+EnumWindowsProc]{
     param([IntPtr]$handle, [IntPtr]$unused)
     $record = Get-WindowRecord $handle
-    if ($null -ne $record) { $windows.Add($record) }
+    if ($null -ne $record) {
+      $script:requestStage = 'window-collection-append'
+      $windows.Add($record)
+    }
     return $true
   }
+  $script:requestStage = 'enumeration-native-call'
   $null = [TouchFishNative]::EnumWindows($callback, [IntPtr]::Zero)
   return @($windows)
 }
@@ -106,14 +116,14 @@ function Find-Window([string]$windowId) {
   return $null
 }
 
-$requestStage = 'dpi-awareness'
+$script:requestStage = 'dpi-awareness'
 try {
   $previousDpiContext = [TouchFishNative]::SetThreadDpiAwarenessContext([IntPtr](-4))
   if ($previousDpiContext -eq [IntPtr]::Zero) {
     Write-Failure 'DPI_AWARENESS_FAILED' 'DPI awareness could not be enabled'
     exit 0
   }
-  $requestStage = 'argument-validation'
+  $script:requestStage = 'argument-validation'
   if ($args.Count -ne 3 -or $args[1] -cne '--payload-base64') {
     throw 'INVALID_REQUEST'
   }
@@ -121,18 +131,18 @@ try {
   if ($command -cnotin @('list-windows', 'foreground-window', 'move-maximize')) {
     throw 'INVALID_COMMAND'
   }
-  $requestStage = 'payload-decode'
+  $script:requestStage = 'payload-decode'
   $payloadText = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($args[2]))
-  $requestStage = 'payload-parse'
+  $script:requestStage = 'payload-parse'
   $payload = ConvertFrom-Json -InputObject $payloadText -ErrorAction Stop
   if ($null -eq $payload -or $payload -isnot [psobject]) { throw 'INVALID_PAYLOAD' }
 
-  $requestStage = 'command-dispatch'
+  $script:requestStage = 'command-dispatch'
   switch ($command) {
     'list-windows' {
-      $requestStage = 'window-enumeration'
+      $script:requestStage = 'window-enumeration'
       $windows = @(Get-AllWindows)
-      $requestStage = 'response-serialization'
+      $script:requestStage = 'response-serialization'
       Write-Envelope $true $windows
       break
     }
@@ -156,6 +166,6 @@ try {
     }
   }
 } catch {
-  Write-Failure 'INVALID_REQUEST' "Request could not be processed at stage: $requestStage"
+  Write-Failure 'INVALID_REQUEST' "Request could not be processed at stage: $script:requestStage"
 }
 exit 0

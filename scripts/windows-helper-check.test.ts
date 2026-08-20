@@ -35,14 +35,23 @@ describe('Windows helper release checks', () => {
       'command-dispatch',
       'window-enumeration',
       'response-serialization',
+      'enumeration-callback-setup',
+      'enumeration-native-call',
+      'window-visibility',
+      'window-style',
+      'window-bounds',
+      'window-process-id',
+      'window-metadata',
+      'window-collection-append',
     ]) {
-      expect(helper).toContain(`$requestStage = '${stage}'`)
+      expect(helper).toContain(`$script:requestStage = '${stage}'`)
     }
     expect(helper).toMatch(
-      /\$requestStage = 'window-enumeration'\s+\$windows = @\(Get-AllWindows\)\s+\$requestStage = 'response-serialization'\s+Write-Envelope \$true \$windows/,
+      /\$script:requestStage = 'window-enumeration'\s+\$windows = @\(Get-AllWindows\)\s+\$script:requestStage = 'response-serialization'\s+Write-Envelope \$true \$windows/,
     )
+    expect(helper).not.toMatch(/\$requestStage\b/)
     expect(failureHandler).toContain(
-      `Write-Failure 'INVALID_REQUEST' "Request could not be processed at stage: $requestStage"`,
+      `Write-Failure 'INVALID_REQUEST' "Request could not be processed at stage: $script:requestStage"`,
     )
     expect(failureHandler).not.toMatch(/\$_|Exception|StackTrace/)
   })
