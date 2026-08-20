@@ -78,6 +78,16 @@ jobs:
       - name: Build native installer
         run: ${{ matrix.package-command }}
 
+      - name: Configure Linux sandbox permissions
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sandbox_path=dist/linux-unpacked/chrome-sandbox
+          sudo chown root:root "$sandbox_path"
+          sudo chmod 4755 "$sandbox_path"
+          test "$(stat -c '%u:%g' "$sandbox_path")" = '0:0'
+          test "$(stat -c '%a' "$sandbox_path")" = '4755'
+
       - name: Smoke packaged Linux app
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum --server-args="-screen 0 1440x900x24" pnpm smoke:linux
