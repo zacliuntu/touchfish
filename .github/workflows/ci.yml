@@ -90,7 +90,30 @@ jobs:
         shell: pwsh
         run: pwsh -NoLogo -NoProfile -File scripts/check-windows-helper.ps1 resources/windows/window-helper.ps1
 
+      - name: Build native Linux installer
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          package_log="$RUNNER_TEMP/linux-package.log"
+          set +e
+          ${{ matrix.package-command }} 2>&1 | tee "$package_log"
+          build_status=${PIPESTATUS[0]}
+          set -e
+
+          if ((build_status != 0)); then
+            diagnostic="$(
+              printf 'Linux installer build failed with exit code %s. Last 200 log lines:\n' "$build_status"
+              tail -n 200 "$package_log"
+            )"
+            diagnostic=${diagnostic//'%'/'%25'}
+            diagnostic=${diagnostic//$'\r'/'%0D'}
+            diagnostic=${diagnostic//$'\n'/'%0A'}
+            printf '::error::%s\n' "$diagnostic"
+            exit "$build_status"
+          fi
+
       - name: Build native installer
+        if: runner.os == 'Windows'
         run: ${{ matrix.package-command }}
 
       - name: Smoke packaged Linux app
