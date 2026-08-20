@@ -129,7 +129,13 @@ try {
 
   $requestStage = 'command-dispatch'
   switch ($command) {
-    'list-windows' { Write-Envelope $true @(Get-AllWindows); break }
+    'list-windows' {
+      $requestStage = 'window-enumeration'
+      $windows = @(Get-AllWindows)
+      $requestStage = 'response-serialization'
+      Write-Envelope $true $windows
+      break
+    }
     'foreground-window' { Write-Envelope $true (Get-ForegroundWindowRecord); break }
     'move-maximize' {
       $windowId = Get-Property $payload 'windowId'

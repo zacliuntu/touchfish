@@ -33,9 +33,14 @@ describe('Windows helper release checks', () => {
       'payload-decode',
       'payload-parse',
       'command-dispatch',
+      'window-enumeration',
+      'response-serialization',
     ]) {
       expect(helper).toContain(`$requestStage = '${stage}'`)
     }
+    expect(helper).toMatch(
+      /\$requestStage = 'window-enumeration'\s+\$windows = @\(Get-AllWindows\)\s+\$requestStage = 'response-serialization'\s+Write-Envelope \$true \$windows/,
+    )
     expect(failureHandler).toContain(
       `Write-Failure 'INVALID_REQUEST' "Request could not be processed at stage: $requestStage"`,
     )
