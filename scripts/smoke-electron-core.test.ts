@@ -133,6 +133,23 @@ describe('smoke electron core', () => {
     expect(forced.kills).toEqual(['SIGTERM', 'SIGKILL'])
     expect(forced.signalCode).toBe('SIGKILL')
   })
+
+  test('CI annotates packaged Linux smoke failures without losing their exit status', async () => {
+    const workflow = await fs.readFile('.github/workflows/ci.yml', 'utf8')
+    const start = workflow.indexOf('- name: Smoke packaged Linux app')
+    const end = workflow.indexOf('- name: Check packaged Windows helper')
+    const step = workflow.slice(start, end)
+
+    expect(step).toContain('pipeline_statuses=("${PIPESTATUS[@]}")')
+    expect(step).toContain('smoke_status=${pipeline_statuses[0]}')
+    expect(step).toContain('tee_status=${pipeline_statuses[1]}')
+    expect(step).toContain('tail -n 200 "$smoke_log"')
+    expect(step).toContain("diagnostic=${diagnostic//'%'/'%25'}")
+    expect(step).toContain("diagnostic=${diagnostic//$'\\r'/'%0D'}")
+    expect(step).toContain("diagnostic=${diagnostic//$'\\n'/'%0A'}")
+    expect(step.match(/::error::/g)).toHaveLength(1)
+    expect(step).toContain('exit "$failure_status"')
+  })
 })
 
 class FakeChild extends EventEmitter {
