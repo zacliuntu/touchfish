@@ -100,7 +100,7 @@ function Get-AllWindows {
   }
   $script:requestStage = 'enumeration-native-call'
   $null = [TouchFishNative]::EnumWindows($callback, [IntPtr]::Zero)
-  return @($windows)
+  return $windows.ToArray()
 }
 
 function Get-ForegroundWindowRecord {

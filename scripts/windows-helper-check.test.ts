@@ -67,6 +67,16 @@ describe('Windows helper release checks', () => {
     expect(helper).toContain('pid = [int64]$ownerProcessId')
   })
 
+  test('materializes the generic window list without the PowerShell array binder', async () => {
+    const helper = await readFile('resources/windows/window-helper.ps1', 'utf8')
+
+    expect(helper).toContain(
+      '$windows = New-Object System.Collections.Generic.List[object]',
+    )
+    expect(helper).not.toContain('return @($windows)')
+    expect(helper).toContain('return $windows.ToArray()')
+  })
+
   test('checker reports protocol error codes and messages but tolerates only DPI failure', async () => {
     const checker = await readFile('scripts/check-windows-helper.ps1', 'utf8')
     const toleratedCodes = Array.from(
