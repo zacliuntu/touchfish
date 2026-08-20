@@ -42,6 +42,17 @@ describe('Windows helper release checks', () => {
     expect(failureHandler).not.toMatch(/\$_|Exception|StackTrace/)
   })
 
+  test('does not collide with the case-insensitive PowerShell PID variable', async () => {
+    const helper = await readFile('resources/windows/window-helper.ps1', 'utf8')
+
+    expect(helper).not.toMatch(/\$processId\b/i)
+    expect(helper).toContain('[uint32]$ownerProcessId = 0')
+    expect(helper).toContain(
+      'GetWindowThreadProcessId($handle, [ref]$ownerProcessId)',
+    )
+    expect(helper).toContain('pid = [int64]$ownerProcessId')
+  })
+
   test('checker reports protocol error codes and messages but tolerates only DPI failure', async () => {
     const checker = await readFile('scripts/check-windows-helper.ps1', 'utf8')
     const toleratedCodes = Array.from(

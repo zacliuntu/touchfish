@@ -59,19 +59,19 @@ function Get-WindowRecord([IntPtr]$handle) {
   $height = $rect.Bottom - $rect.Top
   if ($width -le 0 -or $height -le 0) { return $null }
 
-  [uint32]$processId = 0
-  $null = [TouchFishNative]::GetWindowThreadProcessId($handle, [ref]$processId)
-  if ($processId -eq 0) { return $null }
+  [uint32]$ownerProcessId = 0
+  $null = [TouchFishNative]::GetWindowThreadProcessId($handle, [ref]$ownerProcessId)
+  if ($ownerProcessId -eq 0) { return $null }
   $title = New-Object System.Text.StringBuilder 32768
   $className = New-Object System.Text.StringBuilder 256
   $null = [TouchFishNative]::GetWindowText($handle, $title, $title.Capacity)
   $null = [TouchFishNative]::GetClassName($handle, $className, $className.Capacity)
   $executablePath = $null
-  try { $executablePath = (Get-Process -Id $processId -ErrorAction Stop).MainModule.FileName } catch { }
+  try { $executablePath = (Get-Process -Id $ownerProcessId -ErrorAction Stop).MainModule.FileName } catch { }
 
   $record = [ordered]@{
     id = Get-WindowId $handle
-    pid = [int64]$processId
+    pid = [int64]$ownerProcessId
     title = $title.ToString()
     bounds = [ordered]@{ x = $rect.Left; y = $rect.Top; width = $width; height = $height }
     visible = $true
