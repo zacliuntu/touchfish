@@ -26,3 +26,13 @@ test('installs every Linux command used by the runtime in packages and CI', asyn
     expect(release).toContain(`            ${dependency} \\\n`)
   }
 })
+
+test('disables implicit publishing for native installer builds', async () => {
+  const packageJson = JSON.parse(await readFile('package.json', 'utf8')) as {
+    scripts: Record<string, string>
+  }
+
+  for (const script of ['package:linux', 'package:win']) {
+    expect(packageJson.scripts[script]).toMatch(/(?:^| )--publish never(?: |$)/)
+  }
+})
