@@ -36,3 +36,34 @@ test('disables implicit publishing for native installer builds', async () => {
     expect(packageJson.scripts[script]).toMatch(/(?:^| )--publish never(?: |$)/)
   }
 })
+
+test('configures the Linux SUID sandbox for installs and unpacked CI smoke', async () => {
+  const afterInstall = await readFile('build/after-install.sh', 'utf8')
+  const ci = await readFile('.github/workflows/ci.yml', 'utf8')
+  const permissionStart = ci.indexOf(
+    '- name: Configure Linux sandbox permissions',
+  )
+  const smokeStart = ci.indexOf('- name: Smoke packaged Linux app')
+  const windowsStart = ci.indexOf('- name: Check packaged Windows helper')
+  const permissionStep = ci.slice(permissionStart, smokeStart)
+  const smokeStep = ci.slice(smokeStart, windowsStart)
+
+  expect(afterInstall).toContain('set -e')
+  expect(afterInstall).toContain("sandbox_path='/opt/TouchFish/chrome-sandbox'")
+  expect(afterInstall).toContain('if [ -f "$sandbox_path" ]; then')
+  expect(afterInstall).toContain('chown root:root "$sandbox_path"')
+  expect(afterInstall).toContain('chmod 4755 "$sandbox_path"')
+  expect(afterInstall).not.toMatch(/(?:chown|chmod).*\|\| true/)
+
+  expect(permissionStart).toBeGreaterThan(-1)
+  expect(permissionStep).toContain("if: runner.os == 'Linux'")
+  expect(permissionStep).toContain('sudo chown root:root "$sandbox_path"')
+  expect(permissionStep).toContain('sudo chmod 4755 "$sandbox_path"')
+  expect(permissionStep).toContain(
+    `test "$(stat -c '%u:%g' "$sandbox_path")" = '0:0'`,
+  )
+  expect(permissionStep).toContain(
+    `test "$(stat -c '%a' "$sandbox_path")" = '4755'`,
+  )
+  expect(smokeStep).not.toContain('--no-sandbox')
+})
