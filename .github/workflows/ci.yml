@@ -97,19 +97,31 @@ jobs:
           package_log="$RUNNER_TEMP/linux-package.log"
           set +e
           ${{ matrix.package-command }} 2>&1 | tee "$package_log"
-          build_status=${PIPESTATUS[0]}
+          pipeline_statuses=("${PIPESTATUS[@]}")
+          build_status=${pipeline_statuses[0]}
+          tee_status=${pipeline_statuses[1]}
           set -e
 
-          if ((build_status != 0)); then
+          failure_status=$build_status
+          if ((failure_status == 0 && tee_status != 0)); then
+            failure_status=$tee_status
+          fi
+
+          if ((failure_status != 0)); then
             diagnostic="$(
-              printf 'Linux installer build failed with exit code %s. Last 200 log lines:\n' "$build_status"
-              tail -n 200 "$package_log"
+              printf 'Linux installer build failed (build exit %s, log capture exit %s). Last 200 log lines:\n' "$build_status" "$tee_status"
+              if [[ -r "$package_log" ]]; then
+                tail -n 200 "$package_log" || printf 'Unable to read the complete packaging log.\n'
+              else
+                printf 'Packaging log is unavailable.\n'
+              fi
+              :
             )"
             diagnostic=${diagnostic//'%'/'%25'}
             diagnostic=${diagnostic//$'\r'/'%0D'}
             diagnostic=${diagnostic//$'\n'/'%0A'}
             printf '::error::%s\n' "$diagnostic"
-            exit "$build_status"
+            exit "$failure_status"
           fi
 
       - name: Build native installer
