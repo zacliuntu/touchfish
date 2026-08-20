@@ -23,6 +23,39 @@ describe('Windows helper release checks', () => {
     expect(checker).toMatch(/result.*System\.Array/s)
   })
 
+  test('reports only fixed request stages when the helper rejects a request', async () => {
+    const helper = await readFile('resources/windows/window-helper.ps1', 'utf8')
+    const failureHandler = helper.slice(helper.lastIndexOf('} catch {'))
+
+    for (const stage of [
+      'dpi-awareness',
+      'argument-validation',
+      'payload-decode',
+      'payload-parse',
+      'command-dispatch',
+    ]) {
+      expect(helper).toContain(`$requestStage = '${stage}'`)
+    }
+    expect(failureHandler).toContain(
+      `Write-Failure 'INVALID_REQUEST' "Request could not be processed at stage: $requestStage"`,
+    )
+    expect(failureHandler).not.toMatch(/\$_|Exception|StackTrace/)
+  })
+
+  test('checker reports protocol error codes and messages but tolerates only DPI failure', async () => {
+    const checker = await readFile('scripts/check-windows-helper.ps1', 'utf8')
+    const toleratedCodes = Array.from(
+      checker.matchAll(/\$response\.error\.code -eq '([^']+)'/g),
+      (match) => match[1],
+    )
+
+    expect(toleratedCodes).toEqual(['DPI_AWARENESS_FAILED'])
+    expect(checker).toContain(
+      'throw "Windows helper rejected list-windows: $($response.error.code): $($response.error.message)"',
+    )
+    expect(checker).not.toContain("$response.error.code -eq 'INVALID_REQUEST'")
+  })
+
   test.each([
     ['.github/workflows/ci.yml', 'Verify source'],
     ['.github/workflows/release.yml', 'Verify tagged source'],

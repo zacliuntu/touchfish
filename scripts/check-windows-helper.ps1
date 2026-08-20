@@ -76,7 +76,7 @@ if (-not $response.ok) {
     Write-Warning 'Windows helper protocol is valid, but this runner could not enable DPI awareness'
     exit 0
   }
-  throw "Windows helper rejected list-windows: $($response.error.code)"
+  throw "Windows helper rejected list-windows: $($response.error.code): $($response.error.message)"
 }
 if ($response.result -isnot [System.Array]) {
   throw 'Windows helper list-windows result must be an array'

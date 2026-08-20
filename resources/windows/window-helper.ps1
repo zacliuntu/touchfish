@@ -106,12 +106,14 @@ function Find-Window([string]$windowId) {
   return $null
 }
 
+$requestStage = 'dpi-awareness'
 try {
   $previousDpiContext = [TouchFishNative]::SetThreadDpiAwarenessContext([IntPtr](-4))
   if ($previousDpiContext -eq [IntPtr]::Zero) {
     Write-Failure 'DPI_AWARENESS_FAILED' 'DPI awareness could not be enabled'
     exit 0
   }
+  $requestStage = 'argument-validation'
   if ($args.Count -ne 3 -or $args[1] -cne '--payload-base64') {
     throw 'INVALID_REQUEST'
   }
@@ -119,10 +121,13 @@ try {
   if ($command -cnotin @('list-windows', 'foreground-window', 'move-maximize')) {
     throw 'INVALID_COMMAND'
   }
+  $requestStage = 'payload-decode'
   $payloadText = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($args[2]))
+  $requestStage = 'payload-parse'
   $payload = ConvertFrom-Json -InputObject $payloadText -ErrorAction Stop
   if ($null -eq $payload -or $payload -isnot [psobject]) { throw 'INVALID_PAYLOAD' }
 
+  $requestStage = 'command-dispatch'
   switch ($command) {
     'list-windows' { Write-Envelope $true @(Get-AllWindows); break }
     'foreground-window' { Write-Envelope $true (Get-ForegroundWindowRecord); break }
@@ -145,6 +150,6 @@ try {
     }
   }
 } catch {
-  Write-Failure 'INVALID_REQUEST' 'Request could not be processed'
+  Write-Failure 'INVALID_REQUEST' "Request could not be processed at stage: $requestStage"
 }
 exit 0
