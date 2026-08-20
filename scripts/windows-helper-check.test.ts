@@ -53,4 +53,20 @@ describe('Windows helper release checks', () => {
       )
     },
   )
+
+  test('CI annotates source Windows helper failures without losing their exit status', async () => {
+    const workflow = await readFile('.github/workflows/ci.yml', 'utf8')
+    const start = workflow.indexOf('- name: Check source Windows helper')
+    const end = workflow.indexOf('- name: Build native Linux installer')
+    const step = workflow.slice(start, end)
+
+    expect(step).toContain('$checkerStatus = $LASTEXITCODE')
+    expect(step).toContain('$logStatus = 1')
+    expect(step).toContain('Get-Content -LiteralPath $logPath -Tail 200')
+    expect(step).toMatch(/\.Replace\('%', '%25'\)/)
+    expect(step).toMatch(/\.Replace\("`r", '%0D'\)/)
+    expect(step).toMatch(/\.Replace\("`n", '%0A'\)/)
+    expect(step.match(/::error::/g)).toHaveLength(1)
+    expect(step).toContain('exit $failureStatus')
+  })
 })

@@ -88,7 +88,49 @@ jobs:
       - name: Check source Windows helper
         if: runner.os == 'Windows'
         shell: pwsh
-        run: pwsh -NoLogo -NoProfile -File scripts/check-windows-helper.ps1 resources/windows/window-helper.ps1
+        run: |
+          $logPath = Join-Path $env:RUNNER_TEMP 'source-windows-helper.log'
+          $checkerOutput = @(
+            & pwsh -NoLogo -NoProfile -File scripts/check-windows-helper.ps1 resources/windows/window-helper.ps1 2>&1
+          )
+          $checkerStatus = $LASTEXITCODE
+          $checkerOutput | ForEach-Object { Write-Output $_ }
+
+          $logStatus = 0
+          try {
+            $checkerOutput |
+              ForEach-Object { "$_" } |
+              Set-Content -LiteralPath $logPath -Encoding utf8 -ErrorAction Stop
+          } catch {
+            $logStatus = 1
+            Write-Output "Unable to capture the Windows helper log: $_"
+          }
+
+          $failureStatus = 0
+          if ($checkerStatus -ne 0) {
+            $failureStatus = $checkerStatus
+          } elseif ($logStatus -ne 0) {
+            $failureStatus = $logStatus
+          }
+
+          if ($failureStatus -ne 0) {
+            $diagnosticLines = @(
+              "Windows helper check failed (checker exit $checkerStatus, log capture exit $logStatus). Last 200 log lines:"
+              if (Test-Path -LiteralPath $logPath -PathType Leaf -ErrorAction SilentlyContinue) {
+                try {
+                  Get-Content -LiteralPath $logPath -Tail 200 -ErrorAction Stop
+                } catch {
+                  'Unable to read the complete Windows helper log.'
+                }
+              } else {
+                'Windows helper log is unavailable.'
+              }
+            )
+            $diagnostic = $diagnosticLines -join "`n"
+            $escapedDiagnostic = $diagnostic.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error::$escapedDiagnostic"
+            exit $failureStatus
+          }
 
       - name: Build native Linux installer
         if: runner.os == 'Linux'
